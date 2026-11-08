@@ -1,0 +1,177 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened Global Authorization Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.uid == 'TubyJ10MBxRu4n34WlbaC34Jw1J3' ||
+        (request.auth.token.email == 'prorabbiv@gmail.com' && request.auth.token.email_verified == true) ||
+        (request.auth.token.admin == true) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Input Validation Helpers
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'email', 'role']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.email is string && data.email.size() <= 150 &&
+        data.role in ['customer', 'admin'];
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['id', 'name', 'brand', 'categoryId', 'regularPrice', 'stock', 'status']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.name is string && data.name.size() <= 200 &&
+        data.regularPrice is number && data.regularPrice >= 0 &&
+        data.stock is number && data.stock >= 0 &&
+        data.status in ['active', 'inactive'];
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['id', 'customerName', 'customerPhone', 'items', 'totalAmount', 'paymentMethod', 'status']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.customerName is string && data.customerName.size() <= 120 &&
+        data.customerPhone is string && data.customerPhone.size() <= 20 &&
+        data.items is list && data.items.size() > 0 && data.items.size() <= 100 &&
+        data.totalAmount is number && data.totalAmount >= 0 &&
+        data.paymentMethod in ['cod', 'bkash', 'nagad', 'sslcommerz'] &&
+        data.status in ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'];
+    }
+
+    function isValidReview(data) {
+      return data.keys().hasAll(['id', 'productId', 'userId', 'userName', 'rating', 'comment']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.productId is string && data.productId.size() <= 128 &&
+        data.userId is string && data.userId.size() <= 128 &&
+        data.rating is number && data.rating >= 1 && data.rating <= 5 &&
+        data.comment is string && data.comment.size() <= 1000;
+    }
+
+    function isValidCoupon(data) {
+      return data.keys().hasAll(['id', 'code', 'discountType', 'discountValue', 'active']) &&
+        data.id is string && data.id.size() <= 50 &&
+        data.code is string && data.code.size() <= 50 &&
+        data.discountType in ['percentage', 'fixed'] &&
+        data.discountValue is number && data.discountValue >= 0 &&
+        data.active is bool;
+    }
+
+    function isValidInquiry(data) {
+      return data.keys().hasAll(['id', 'name', 'email', 'message']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.name is string && data.name.size() <= 120 &&
+        data.email is string && data.email.size() <= 150 &&
+        data.message is string && data.message.size() <= 2000;
+    }
+
+    // Admins Collection: strictly protected
+    match /admins/{adminId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Users Collection: customer isolation & no self-assigned admin role
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.role == 'customer';
+      allow update: if (
+        isOwner(userId) &&
+        isValidUser(request.resource.data) &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.id == resource.data.id
+      ) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Products: public read, admin-only write
+    match /products/{productId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidProduct(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Categories: public read, admin-only write
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Orders Collection: customer access isolation & safe status cancellation
+    match /orders/{orderId} {
+      allow get: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
+      allow list: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
+      allow create: if isValidId(orderId) &&
+        isValidOrder(request.resource.data) &&
+        (!isSignedIn() || request.resource.data.userId == request.auth.uid);
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        resource.data.userId == request.auth.uid &&
+        resource.data.status == 'pending' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+        request.resource.data.status == 'cancelled'
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Reviews Collection: public read, verified user writes
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isSignedIn() &&
+        isValidReview(request.resource.data) &&
+        request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin() || (
+        isSignedIn() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == resource.data.userId
+      );
+    }
+
+    // Coupons Collection: public read for checkout computation, admin-only writes
+    match /coupons/{couponId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Homepage Banners: public read, admin-only writes
+    match /banners/{bannerId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Store Settings: public read for delivery fees & contacts, admin-only writes
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Customer Inquiries: public submission, admin-only review
+    match /inquiries/{inquiryId} {
+      allow create: if isValidId(inquiryId) && isValidInquiry(request.resource.data);
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Admin Audit Logs: restricted to administrator
+    match /auditLogs/{logId} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

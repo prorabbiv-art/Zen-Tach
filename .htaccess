@@ -1,0 +1,82 @@
+# ==============================================================================
+# ZEN TACH - PRODUCTION APACHE / CPANEL .HTACCESS CONFIGURATION
+# ==============================================================================
+# Place this file in your cPanel 'public_html' directory (or the root of your domain).
+# ==============================================================================
+
+# 1. DISABLE DIRECTORY BROWSING
+Options -Indexes
+
+# 2. ENABLE APACHE REWRITE ENGINE FOR SINGLE PAGE APPLICATION (SPA) ROUTING
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Don't rewrite actual files (CSS, JS, images, fonts, audio, video)
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  # Don't rewrite actual existing directories
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # All other requests (e.g. /shop, /admin, /cart, /checkout, /product/123)
+  # are routed to index.html so React Router / SPA handles client-side rendering
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+# 3. PREVENT CACHING OF INDEX.HTML (Ensures instant updates upon deployment)
+<IfModule mod_headers.c>
+  <Files "index.html">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </Files>
+
+  # SECURITY HEADERS
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-Frame-Options "SAMEORIGIN"
+  Header set X-XSS-Protection "1; mode=block"
+  Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# 4. LEVERAGE BROWSER CACHING FOR HASHED STATIC ASSETS (Fast page loads)
+<IfModule mod_expires.c>
+  ExpiresActive On
+
+  # Vite hashed JS & CSS files (1 year cache)
+  ExpiresByType application/javascript "access plus 1 year"
+  ExpiresByType text/javascript "access plus 1 year"
+  ExpiresByType text/css "access plus 1 year"
+
+  # Images and icons (1 month cache)
+  ExpiresByType image/png "access plus 1 month"
+  ExpiresByType image/jpeg "access plus 1 month"
+  ExpiresByType image/webp "access plus 1 month"
+  ExpiresByType image/svg+xml "access plus 1 month"
+  ExpiresByType image/x-icon "access plus 1 month"
+
+  # Web fonts (1 year cache)
+  ExpiresByType font/woff2 "access plus 1 year"
+  ExpiresByType font/woff "access plus 1 year"
+  ExpiresByType font/ttf "access plus 1 year"
+</IfModule>
+
+# 5. GZIP COMPRESSION FOR TEXT / JSON / JS / CSS / SVG
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/plain
+  AddOutputFilterByType DEFLATE text/html
+  AddOutputFilterByType DEFLATE text/xml
+  AddOutputFilterByType DEFLATE text/css
+  AddOutputFilterByType DEFLATE text/javascript
+  AddOutputFilterByType DEFLATE application/xml
+  AddOutputFilterByType DEFLATE application/xhtml+xml
+  AddOutputFilterByType DEFLATE application/rss+xml
+  AddOutputFilterByType DEFLATE application/javascript
+  AddOutputFilterByType DEFLATE application/x-javascript
+  AddOutputFilterByType DEFLATE application/json
+  AddOutputFilterByType DEFLATE image/svg+xml
+</IfModule>
+
+# 6. BLOCK ACCESS TO SENSITIVE DOTFILES (Except .well-known for cPanel AutoSSL)
+<IfModule mod_rewrite.c>
+  RewriteRule ^\.(?!well-known) - [F]
+</IfModule>

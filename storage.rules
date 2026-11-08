@@ -1,0 +1,57 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Default deny all access
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.uid == 'TubyJ10MBxRu4n34WlbaC34Jw1J3' ||
+        (request.auth.token.email == 'prorabbiv@gmail.com' && request.auth.token.email_verified == true) ||
+        request.auth.token.admin == true
+      );
+    }
+
+    function isImageFile() {
+      return request.resource.contentType.matches('image/(jpeg|png|webp|avif|svg\\+xml)');
+    }
+
+    function isUnderMaxSize(maxMegabytes) {
+      return request.resource.size <= maxMegabytes * 1024 * 1024;
+    }
+
+    // Public product images - uploads restricted to admin
+    match /products/{productId}/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin() && isImageFile() && isUnderMaxSize(10);
+      allow delete: if isAdmin();
+    }
+
+    // Category images - uploads restricted to admin
+    match /categories/{categoryId}/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin() && isImageFile() && isUnderMaxSize(5);
+      allow delete: if isAdmin();
+    }
+
+    // Banner images - uploads restricted to admin
+    match /banners/{bannerId}/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin() && isImageFile() && isUnderMaxSize(10);
+      allow delete: if isAdmin();
+    }
+
+    // User avatar/profile images - upload restricted to the owning user
+    match /users/{userId}/{fileName} {
+      allow read: if true;
+      allow write: if isSignedIn() && request.auth.uid == userId && isImageFile() && isUnderMaxSize(5);
+      allow delete: if (isSignedIn() && request.auth.uid == userId) || isAdmin();
+    }
+  }
+}
